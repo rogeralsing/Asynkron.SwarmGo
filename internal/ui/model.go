@@ -784,7 +784,8 @@ func (m *Model) renderAgentLog(id string, buf *logBuffer) string {
 	}
 
 	renderDeadline := time.Now().Add(markdownRenderBudget)
-	markdownAllowed := id == "supervisor"
+	// Render markdown for all agents once (no reflow) to improve readability.
+	markdownAllowed := true
 	lines := make([]string, 0, len(buf.lines))
 	for i := range buf.lines {
 		l := &buf.lines[i]
