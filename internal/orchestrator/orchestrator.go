@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,14 +68,17 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 
 	// Start agents
 	o.emit(events.PhaseChanged{Phase: "Starting workers..."})
-	workers, workerLogs, workerTypes, err := o.startWorkers(ctx, worktrees)
+	ghAvailable := checkGhAvailable()
+	isGitHubRepo := checkGitHubRepo(o.opts.Repo)
+
+	workers, workerLogs, workerTypes, err := o.startWorkers(ctx, worktrees, ghAvailable, isGitHubRepo)
 	if err != nil {
 		o.stopAll()
 		return err
 	}
 
 	o.emit(events.PhaseChanged{Phase: "Starting supervisor..."})
-	supervisor, err := o.startSupervisor(ctx, worktrees, workerLogs, workerTypes)
+	supervisor, err := o.startSupervisor(ctx, worktrees, workerLogs, workerTypes, ghAvailable, isGitHubRepo)
 	if err != nil {
 		o.stopAll()
 		return err
@@ -121,7 +126,7 @@ loop:
 	return nil
 }
 
-func (o *Orchestrator) startWorkers(ctx context.Context, worktrees []string) ([]*agents.Agent, []string, []config.AgentType, error) {
+func (o *Orchestrator) startWorkers(ctx context.Context, worktrees []string, ghAvailable bool, isGitHubRepo bool) ([]*agents.Agent, []string, []config.AgentType, error) {
 	var workers []*agents.Agent
 	var logs []string
 	var types []config.AgentType
@@ -137,7 +142,7 @@ func (o *Orchestrator) startWorkers(ctx context.Context, worktrees []string) ([]
 		}
 
 		logPath := o.session.WorkerLogPath(i + 1)
-		worker := agents.NewWorker(i, worktrees[i], o.opts.Todo, cli, logPath, o.opts.Autopilot, branchName, o.events)
+		worker := agents.NewWorker(i, worktrees[i], o.opts.Todo, cli, logPath, o.opts.Autopilot, branchName, ghAvailable, isGitHubRepo, o.events)
 		if err := worker.Start(ctx); err != nil {
 			return nil, nil, nil, err
 		}
@@ -152,7 +157,7 @@ func (o *Orchestrator) startWorkers(ctx context.Context, worktrees []string) ([]
 	return workers, logs, types, nil
 }
 
-func (o *Orchestrator) startSupervisor(ctx context.Context, worktrees, workerLogs []string, workerTypes []config.AgentType) (*agents.Agent, error) {
+func (o *Orchestrator) startSupervisor(ctx context.Context, worktrees, workerLogs []string, workerTypes []config.AgentType, ghAvailable bool, isGitHubRepo bool) (*agents.Agent, error) {
 	// Start coded supervisor collector in the background for aggregated signals.
 	if o.codedSupervisor == nil {
 		o.codedSupervisor = supervisor.NewCodedSupervisor(o.session.CodedSupervisorPath(), worktrees, workerLogs, workerTypes, o.session.Created, 5*time.Second)
@@ -160,7 +165,7 @@ func (o *Orchestrator) startSupervisor(ctx context.Context, worktrees, workerLog
 	}
 
 	cli := agents.NewCLI(o.opts.Supervisor)
-	supervisor := agents.NewSupervisor(worktrees, workerLogs, o.opts.Repo, o.session.CodedSupervisorPath(), cli, o.session.SupervisorLogPath(), o.opts.Autopilot, o.events)
+	supervisor := agents.NewSupervisor(worktrees, workerLogs, o.opts.Repo, o.session.CodedSupervisorPath(), cli, o.session.SupervisorLogPath(), o.opts.Autopilot, ghAvailable, isGitHubRepo, o.events)
 	if err := supervisor.Start(ctx); err != nil {
 		return nil, err
 	}
@@ -213,6 +218,25 @@ func (o *Orchestrator) loadTodo() {
 		return
 	}
 	o.emit(events.TodoLoaded{Content: string(content), Path: todoPath})
+}
+
+func checkGhAvailable() bool {
+	_, err := exec.LookPath("gh")
+	return err == nil
+}
+
+func checkGitHubRepo(repoPath string) bool {
+	if repoPath == "" {
+		return false
+	}
+	cmd := exec.Command("git", "config", "--get", "remote.origin.url")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	remote := strings.ToLower(strings.TrimSpace(string(out)))
+	return strings.Contains(remote, "github.com")
 }
 
 func (o *Orchestrator) emit(ev events.Event) {

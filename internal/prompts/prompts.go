@@ -6,7 +6,7 @@ import (
 )
 
 // WorkerPrompt mirrors the .NET worker prompt with Go-friendly formatting.
-func WorkerPrompt(todoFile, agentName string, autopilot bool, branchName string, logPath string, restartCount int) string {
+func WorkerPrompt(todoFile, agentName string, autopilot bool, branchName string, logPath string, restartCount int, ghAvailable bool, isGitHubRepo bool) string {
 	base := fmt.Sprintf("run `cat %s` to read the todo file (use cat/tail, not Read tool - files can be large), then follow the instructions", todoFile)
 
 	waysOfWorking := `
@@ -37,6 +37,9 @@ This broadcasts messages to all other agents in the swarm.
 Document ALL relevant findings by using:
 tell "%s: <your message here>"
 
+Repository origin: %s
+GitHub CLI (gh): %s
+
 Examples:
 - tell "%s: I found a bug in CopycatProxy.cs at lines 2013-2015"
 - tell "%s: Tests now pass after fixing the null check in UserService"
@@ -52,7 +55,7 @@ What to communicate:
 - Any insight that might help other agents
 
 IMPORTANT: Use tell frequently to share your findings with the swarm.
-`, agentName, agentName, agentName, agentName, agentName)
+`, agentName, agentName, agentName, agentName, agentName, githubRepoHint(isGitHubRepo), ghHint(ghAvailable))
 
 	autopilotBlock := ""
 	if autopilot && branchName != "" {
@@ -91,7 +94,7 @@ Instead, recover your previous work:
 }
 
 // SupervisorPrompt mirrors the supervisor prompt for both modes.
-func SupervisorPrompt(worktreePaths []string, workerLogPaths []string, repoPath string, codedSupervisorPath string, autopilot bool, restartCount int) string {
+func SupervisorPrompt(worktreePaths []string, workerLogPaths []string, repoPath string, codedSupervisorPath string, autopilot bool, restartCount int, ghAvailable bool, isGitHubRepo bool) string {
 	workerList := make([]string, len(worktreePaths))
 	for i, wt := range worktreePaths {
 		workerList[i] = fmt.Sprintf("- Worker %d: %s", i+1, wt)
@@ -113,6 +116,8 @@ Check worker logs to understand current state and continue monitoring from where
 		return fmt.Sprintf(`
 You are a supervisor agent overseeing multiple worker agents in AUTOPILOT mode.
 Workers will create their own GitHub PRs when done. Your job is to monitor and summarize their progress.
+Repository origin: %s
+GitHub CLI (gh): %s
 %s
 ## Your Task: Monitor and Summarize
 
@@ -149,11 +154,13 @@ Treat this file like the worker logs and read it for up-to-date git status and t
 
 START NOW: Begin monitoring immediately. Print status summary every cycle.
 When all workers have finished, provide a final summary and exit.
-`, restart, strings.Join(workerList, "\n"), strings.Join(logList, "\n"), codedSupervisorPath)
+`, githubRepoHint(isGitHubRepo), ghHint(ghAvailable), restart, strings.Join(workerList, "\n"), strings.Join(logList, "\n"), codedSupervisorPath)
 	}
 
 	return fmt.Sprintf(`
 You are a supervisor agent overseeing multiple worker agents competing to fix issues.
+Repository origin: %s
+GitHub CLI (gh): %s
 %s
 IMPORTANT: Do NOT exit until you have completed ALL phases below. This is a long-running task.
 
@@ -218,5 +225,19 @@ Coded supervisor summary: %s
 Treat this file like the worker logs and read it for up-to-date git status and test signals.
 
 START NOW: Begin Phase 1 loop immediately. Print status table every 30 seconds.
-`, restart, repoPath, strings.Join(workerList, "\n"), strings.Join(logList, "\n"), repoPath, codedSupervisorPath)
+`, githubRepoHint(isGitHubRepo), ghHint(ghAvailable), restart, repoPath, strings.Join(workerList, "\n"), strings.Join(logList, "\n"), repoPath, codedSupervisorPath)
+}
+
+func ghHint(available bool) string {
+	if available {
+		return "available (gh)"
+	}
+	return "not installed"
+}
+
+func githubRepoHint(isGitHub bool) string {
+	if isGitHub {
+		return "GitHub"
+	}
+	return "non-GitHub"
 }

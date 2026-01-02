@@ -9,10 +9,10 @@ import (
 )
 
 // NewWorker builds a configured Agent representing a worker.
-func NewWorker(index int, worktree string, todoFile string, cli CLI, logPath string, autopilot bool, branchName string, events chan<- events.Event) *Agent {
+func NewWorker(index int, worktree string, todoFile string, cli CLI, logPath string, autopilot bool, branchName string, ghAvailable bool, isGitHubRepo bool, events chan<- events.Event) *Agent {
 	// Pick display model based on worker index for a bit of variety.
 	apiModel, displayModel := cli.Model(index)
-	prompt := prompts.WorkerPrompt(todoFile, fmt.Sprintf("Worker %d", index+1), autopilot, branchName, logPath, 0)
+	prompt := prompts.WorkerPrompt(todoFile, fmt.Sprintf("Worker %d", index+1), autopilot, branchName, logPath, 0, ghAvailable, isGitHubRepo)
 
 	return &Agent{
 		ID:      fmt.Sprintf("worker-%d", index+1),
@@ -28,8 +28,8 @@ func NewWorker(index int, worktree string, todoFile string, cli CLI, logPath str
 }
 
 // NewSupervisor builds the supervisor agent.
-func NewSupervisor(worktrees []string, workerLogs []string, repoPath string, codedPath string, cli CLI, logPath string, autopilot bool, events chan<- events.Event) *Agent {
-	prompt := prompts.SupervisorPrompt(worktrees, workerLogs, repoPath, codedPath, autopilot, 0)
+func NewSupervisor(worktrees []string, workerLogs []string, repoPath string, codedPath string, cli CLI, logPath string, autopilot bool, ghAvailable bool, isGitHubRepo bool, events chan<- events.Event) *Agent {
+	prompt := prompts.SupervisorPrompt(worktrees, workerLogs, repoPath, codedPath, autopilot, 0, ghAvailable, isGitHubRepo)
 	apiModel, displayModel := cli.Model(int(time.Now().UnixNano()))
 	return &Agent{
 		ID:              "supervisor",
