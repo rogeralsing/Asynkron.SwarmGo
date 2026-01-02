@@ -28,9 +28,11 @@ type Agent struct {
 	events   chan<- events.Event
 	restarts int
 
-	cmd     *exec.Cmd
-	logFile *os.File
-	mu      sync.Mutex
+	cmd        *exec.Cmd
+	logFile    *os.File
+	mu         sync.Mutex
+	tailCancel context.CancelFunc
+	tailWG     sync.WaitGroup
 }
 
 // Start launches the agent process and begins streaming output.
@@ -51,13 +53,20 @@ func (a *Agent) Start(ctx context.Context) error {
 	}
 	a.logFile = logFile
 
+	_, _ = fmt.Fprintf(a.logFile, "[%s] %s starting\n", time.Now().Format(time.RFC3339), a.Name)
+	_, _ = fmt.Fprintf(a.logFile, "[%s] workdir: %s\n", time.Now().Format(time.RFC3339), a.Workdir)
+
 	args := a.CLI.BuildArgs(a.Prompt, a.Model)
 	cmd := exec.CommandContext(ctx, a.CLI.Command(), args...)
 	cmd.Dir = a.Workdir
 
-	_, _ = fmt.Fprintf(a.logFile, "[%s] %s starting\n", time.Now().Format(time.RFC3339), a.Name)
-	_, _ = fmt.Fprintf(a.logFile, "[%s] workdir: %s\n", time.Now().Format(time.RFC3339), a.Workdir)
 	_, _ = fmt.Fprintf(a.logFile, "[%s] command: %s %s\n\n", time.Now().Format(time.RFC3339), a.CLI.Command(), strings.Join(args, " "))
+
+	// Tail the log file so UI sees live output (mirrors the C# message stream).
+	tailCtx, cancel := context.WithCancel(context.Background())
+	a.tailCancel = cancel
+	a.tailWG.Add(1)
+	go a.tailFile(tailCtx)
 
 	if a.CLI.UseStdin() {
 		stdin, err := cmd.StdinPipe()
@@ -113,6 +122,11 @@ func (a *Agent) Stop() {
 		return
 	}
 	_ = a.cmd.Process.Kill()
+
+	if a.tailCancel != nil {
+		a.tailCancel()
+	}
+	a.tailWG.Wait()
 }
 
 func (a *Agent) stream(r io.Reader) {
@@ -120,7 +134,6 @@ func (a *Agent) stream(r io.Reader) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		_, _ = a.logFile.WriteString(line + "\n")
-		a.emit(events.AgentLine{ID: a.ID, Line: line})
 	}
 }
 
@@ -155,6 +168,11 @@ func (a *Agent) wait(ctx context.Context) {
 	if logFile != nil {
 		_ = logFile.Close()
 	}
+
+	if a.tailCancel != nil {
+		a.tailCancel()
+	}
+	a.tailWG.Wait()
 }
 
 func (a *Agent) emit(ev events.Event) {
@@ -165,5 +183,56 @@ func (a *Agent) emit(ev events.Event) {
 	case a.events <- ev:
 	default:
 		// Drop if channel is full to keep agents flowing.
+	}
+}
+
+// tailFile streams appended log content to the UI, similar to the original C# message stream.
+func (a *Agent) tailFile(ctx context.Context) {
+	defer a.tailWG.Done()
+
+	const tailBytes = 64 * 1024
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		f, err := os.Open(a.LogPath)
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		reader := bufio.NewReader(f)
+		if info, _ := f.Stat(); info != nil && info.Size() > tailBytes {
+			_, _ = f.Seek(-tailBytes, io.SeekEnd)
+			reader = bufio.NewReader(f)
+			_, _ = reader.ReadString('\n') // drop partial line
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				_ = f.Close()
+				return
+			default:
+			}
+
+			line, err := reader.ReadString('\n')
+			if line != "" {
+				a.emit(events.AgentLine{ID: a.ID, Line: strings.TrimRight(line, "\r\n")})
+			}
+			if err != nil {
+				if err == io.EOF {
+					time.Sleep(50 * time.Millisecond)
+					continue
+				}
+				break
+			}
+		}
+		_ = f.Close()
+		time.Sleep(100 * time.Millisecond)
 	}
 }
