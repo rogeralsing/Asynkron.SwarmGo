@@ -455,6 +455,7 @@ func (m *Model) updateViewport() {
 			m.view.SetContent(style.Render("waiting for output..."))
 		}
 	}
+	m.clampViewport()
 }
 
 func (m Model) renderHeader() string {
