@@ -1,0 +1,48 @@
+project_name: swarm
+
+builds:
+  - id: swarm
+    dir: .
+    main: ./cmd/swarm
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: swarm
+    builds:
+      - swarm
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+release:
+  github:
+    owner: rogeralsing
+    name: Asynkron.SwarmGo
+  draft: false
+  prerelease: false
