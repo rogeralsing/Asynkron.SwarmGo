@@ -111,6 +111,8 @@ func main() {
 
 	cancel()
 	wg.Wait()
+
+	fmt.Printf("\nSession complete. To resume use: swarm --resume %s\n", sess.ID)
 }
 
 func parseFlags() (config.Options, string, string, int, bool) {

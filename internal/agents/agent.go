@@ -278,7 +278,16 @@ func (a *Agent) tailFile(ctx context.Context) {
 							msg.Kind = events.MessageSay
 						}
 					}
-					a.emit(events.AgentLine{ID: a.ID, Kind: msg.Kind, Line: msg.Text})
+					if msg.Kind == events.MessageSay {
+						a.emit(events.AgentLine{ID: a.ID, Kind: msg.Kind, Line: msg.Text})
+						continue
+					}
+					for _, p := range strings.Split(msg.Text, "\n") {
+						if strings.TrimRight(p, " \t\r") == "" {
+							continue
+						}
+						a.emit(events.AgentLine{ID: a.ID, Kind: msg.Kind, Line: p})
+					}
 				}
 			}
 			if err == nil {

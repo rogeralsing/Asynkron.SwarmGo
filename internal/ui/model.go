@@ -51,7 +51,7 @@ type Model struct {
 	hasCoded     bool
 	eventsClosed bool
 	pendingView  bool
-	scrollBottom bool
+	followTail   bool
 	mdRenderer   *glamour.TermRenderer
 	mdMu         sync.Mutex
 	todoCache    todoCache
@@ -177,6 +177,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.view.LineUp(3)
 				skipViewport = true
 			}
+			m.followTail = m.view.AtBottom()
 		case tea.MouseWheelDown:
 			if msg.X <= m.listWidth {
 				if m.selected < len(m.itemOrder)-1 {
@@ -188,6 +189,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.view.LineDown(3)
 				skipViewport = true
 			}
+			m.followTail = m.view.AtBottom()
 		case tea.MouseMotion:
 			// update hover only
 			skipViewport = true
@@ -226,17 +228,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.selected > 0 {
 				m.selected--
+				m.followTail = m.isLogSelection()
 				skipViewport = true
 			}
 		case "down", "j":
 			if m.selected < len(m.itemOrder)-1 {
 				m.selected++
+				m.followTail = m.isLogSelection()
 				skipViewport = true
 			}
 		case "pgup":
 			m.view.LineUp(10)
+			m.followTail = m.view.AtBottom()
 		case "pgdown":
 			m.view.LineDown(10)
+			m.followTail = m.view.AtBottom()
 		case " ":
 			m.toggleAgent()
 		case "enter":
@@ -269,14 +275,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewportUpdateMsg:
 		m.pendingView = false
 		m.updateViewport()
-		if m.scrollBottom {
-			if len(m.itemOrder) > 0 && m.selected < len(m.itemOrder) {
-				if id := m.itemOrder[m.selected]; id != "session" && id != "todo" && id != "coded" {
-					m.view.GotoBottom()
-				}
-			}
-			m.scrollBottom = false
-		}
 	}
 
 	if !m.eventsClosed {
@@ -286,6 +284,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !skipViewport {
 		m.view, cmd = m.view.Update(msg)
 		cmds = append(cmds, cmd)
+	}
+	if !skipViewport && m.isLogSelection() {
+		m.followTail = m.view.AtBottom()
 	}
 	if skipViewport {
 		if c := m.requestViewportUpdate(); c != nil {
@@ -358,6 +359,10 @@ func (m *Model) handleEvent(ev events.Event) (Model, tea.Cmd) {
 		}
 		buf := m.ensureLog(e.ID)
 		kind := e.Kind
+		selected := m.selected < len(m.itemOrder) && m.itemOrder[m.selected] == e.ID
+		if selected && !m.view.AtBottom() {
+			m.followTail = false
+		}
 		if ag, ok := m.agents[e.ID]; ok && ag.Kind == "Codex" {
 			switch strings.TrimSpace(e.Line) {
 			case "[exec]":
@@ -373,8 +378,8 @@ func (m *Model) handleEvent(ev events.Event) (Model, tea.Cmd) {
 		if trimmed && m.selected < len(m.itemOrder) && m.itemOrder[m.selected] == e.ID {
 			m.clampViewport()
 		}
-		if m.selected < len(m.itemOrder) && m.itemOrder[m.selected] == e.ID && !m.mouseOverLog && m.isAtBottom() {
-			m.scrollBottom = true
+		if selected && !m.mouseOverLog && m.followTail {
+			m.view.GotoBottom()
 		}
 		if c := m.requestViewportUpdate(); c != nil {
 			return *m, c
@@ -467,6 +472,7 @@ func (m *Model) updateViewport() {
 	// Always jump to bottom when switching selection to match log tail expectation.
 	if id != "session" && id != "todo" && id != "coded" {
 		m.view.GotoBottom()
+		m.followTail = true
 	}
 }
 
@@ -915,6 +921,14 @@ func (m *Model) isAtBottom() bool {
 		return true
 	}
 	return m.view.AtBottom() || m.view.PastBottom()
+}
+
+func (m *Model) isLogSelection() bool {
+	if m.selected >= len(m.itemOrder) {
+		return false
+	}
+	id := m.itemOrder[m.selected]
+	return id != "session" && id != "todo" && id != "coded"
 }
 
 func (m *Model) anyPendingDo() bool {
