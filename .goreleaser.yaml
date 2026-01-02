@@ -1,3 +1,4 @@
+version: 2
 project_name: swarm
 
 builds:
@@ -16,22 +17,8 @@ builds:
     ldflags:
       - -s -w
 
-archives:
-  - id: swarm
-    builds:
-      - swarm
-    format_overrides:
-      - goos: windows
-        format: zip
-    files:
-      - README.md
-      - LICENSE
-
 checksum:
   name_template: "checksums.txt"
-
-snapshot:
-  name_template: "{{ .Tag }}-next"
 
 changelog:
   sort: asc
