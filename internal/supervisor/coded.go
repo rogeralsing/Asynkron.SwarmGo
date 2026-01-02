@@ -14,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/asynkron/Asynkron.SwarmGo/internal/agents"
+	"github.com/asynkron/Asynkron.SwarmGo/internal/config"
 )
 
 // CodedSupervisor collects lightweight signals from worker worktrees and logs, writing them
@@ -36,6 +39,7 @@ type workerInfo struct {
 	Number   int
 	Worktree string
 	LogPath  string
+	CLI      agents.CLI
 }
 
 type workerState struct {
@@ -45,13 +49,13 @@ type workerState struct {
 }
 
 type gitSnapshot struct {
-	Branch        string        `json:"branch"`
-	Staged        []fileChange  `json:"staged"`
-	Unstaged      []fileChange  `json:"unstaged"`
-	Untracked     []string      `json:"untracked"`
-	RecentCommits []string      `json:"recentCommits"`
-	Error         string        `json:"error,omitempty"`
-	UpdatedAt     time.Time     `json:"updatedAt"`
+	Branch        string       `json:"branch"`
+	Staged        []fileChange `json:"staged"`
+	Unstaged      []fileChange `json:"unstaged"`
+	Untracked     []string     `json:"untracked"`
+	RecentCommits []string     `json:"recentCommits"`
+	Error         string       `json:"error,omitempty"`
+	UpdatedAt     time.Time    `json:"updatedAt"`
 }
 
 type fileChange struct {
@@ -95,7 +99,7 @@ const (
 )
 
 // NewCodedSupervisor returns a background collector. Call Start to begin polling, and Close to stop.
-func NewCodedSupervisor(outputPath string, worktrees []string, workerLogs []string, interval time.Duration) *CodedSupervisor {
+func NewCodedSupervisor(outputPath string, worktrees []string, workerLogs []string, agentTypes []config.AgentType, interval time.Duration) *CodedSupervisor {
 	if interval <= 0 {
 		interval = defaultInterval
 	}
@@ -104,13 +108,18 @@ func NewCodedSupervisor(outputPath string, worktrees []string, workerLogs []stri
 	if len(workerLogs) < limit {
 		limit = len(workerLogs)
 	}
+	if len(agentTypes) < limit {
+		limit = len(agentTypes)
+	}
 
 	workers := make([]workerInfo, 0, limit)
 	for i := 0; i < limit; i++ {
+		cli := agents.NewCLI(agentTypes[i])
 		workers = append(workers, workerInfo{
 			Number:   i + 1,
 			Worktree: worktrees[i],
 			LogPath:  workerLogs[i],
+			CLI:      cli,
 		})
 	}
 
@@ -234,13 +243,20 @@ func (c *CodedSupervisor) collectLogs(w workerInfo) {
 		if line == "" {
 			continue
 		}
-		switch {
-		case passRegex.MatchString(line):
-			state.Logs = append(state.Logs, logEvent{Timestamp: now, Kind: "pass", Message: trimLine(line)})
-		case failRegex.MatchString(line):
-			state.Logs = append(state.Logs, logEvent{Timestamp: now, Kind: "fail", Message: trimLine(line)})
-		default:
+		msgs := w.CLI.Parse(line)
+		if msgs == nil {
 			continue
+		}
+		for _, msg := range msgs {
+			text := trimLine(msg.Text)
+			switch {
+			case passRegex.MatchString(text):
+				state.Logs = append(state.Logs, logEvent{Timestamp: now, Kind: "pass", Message: text})
+			case failRegex.MatchString(text):
+				state.Logs = append(state.Logs, logEvent{Timestamp: now, Kind: "fail", Message: text})
+			default:
+				continue
+			}
 		}
 		if len(state.Logs) > maxLogEvents {
 			state.Logs = state.Logs[len(state.Logs)-maxLogEvents:]
@@ -394,4 +410,58 @@ func trimLine(line string) string {
 		return line
 	}
 	return line[:max]
+}
+
+func summarizeLogLine(line string) string {
+	var root map[string]any
+	if err := json.Unmarshal([]byte(line), &root); err != nil {
+		return line
+	}
+	switch root["type"] {
+	case "assistant":
+		msg, _ := root["message"].(map[string]any)
+		content, _ := msg["content"].([]any)
+		var parts []string
+		for _, c := range content {
+			obj, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			if obj["type"] == "text" {
+				if txt, ok := obj["text"].(string); ok {
+					parts = append(parts, strings.TrimSpace(txt))
+				}
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, " ")
+		}
+	case "user":
+		if tool, ok := root["tool_use_result"].(map[string]any); ok {
+			if out, ok := tool["stdout"].(string); ok && strings.TrimSpace(out) != "" {
+				return strings.TrimSpace(out)
+			}
+			if errStr, ok := tool["stderr"].(string); ok && strings.TrimSpace(errStr) != "" {
+				return strings.TrimSpace(errStr)
+			}
+		}
+		msg, _ := root["message"].(map[string]any)
+		content, _ := msg["content"].([]any)
+		var parts []string
+		for _, c := range content {
+			obj, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			if obj["type"] == "text" {
+				if txt, ok := obj["text"].(string); ok {
+					parts = append(parts, strings.TrimSpace(txt))
+				}
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, " ")
+		}
+	}
+	return line
 }

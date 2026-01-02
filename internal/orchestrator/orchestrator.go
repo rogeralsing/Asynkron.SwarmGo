@@ -66,14 +66,14 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 
 	// Start agents
 	o.emit(events.PhaseChanged{Phase: "Starting workers..."})
-	workers, workerLogs, err := o.startWorkers(ctx, worktrees)
+	workers, workerLogs, workerTypes, err := o.startWorkers(ctx, worktrees)
 	if err != nil {
 		o.stopAll()
 		return err
 	}
 
 	o.emit(events.PhaseChanged{Phase: "Starting supervisor..."})
-	supervisor, err := o.startSupervisor(ctx, worktrees, workerLogs)
+	supervisor, err := o.startSupervisor(ctx, worktrees, workerLogs, workerTypes)
 	if err != nil {
 		o.stopAll()
 		return err
@@ -121,9 +121,10 @@ loop:
 	return nil
 }
 
-func (o *Orchestrator) startWorkers(ctx context.Context, worktrees []string) ([]*agents.Agent, []string, error) {
+func (o *Orchestrator) startWorkers(ctx context.Context, worktrees []string) ([]*agents.Agent, []string, []config.AgentType, error) {
 	var workers []*agents.Agent
 	var logs []string
+	var types []config.AgentType
 
 	timestamp := time.Now().Format("20060102-150405")
 
@@ -138,22 +139,23 @@ func (o *Orchestrator) startWorkers(ctx context.Context, worktrees []string) ([]
 		logPath := o.session.WorkerLogPath(i + 1)
 		worker := agents.NewWorker(i, worktrees[i], o.opts.Todo, cli, logPath, o.opts.Autopilot, branchName, o.events)
 		if err := worker.Start(ctx); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		workers = append(workers, worker)
 		logs = append(logs, logPath)
+		types = append(types, agentType)
 		o.track(worker)
 		o.emit(events.StatusMessage{Message: fmt.Sprintf("Started %s (%s) -> %s", worker.Name, cli.Name(), worktrees[i])})
 	}
 
-	return workers, logs, nil
+	return workers, logs, types, nil
 }
 
-func (o *Orchestrator) startSupervisor(ctx context.Context, worktrees, workerLogs []string) (*agents.Agent, error) {
+func (o *Orchestrator) startSupervisor(ctx context.Context, worktrees, workerLogs []string, workerTypes []config.AgentType) (*agents.Agent, error) {
 	// Start coded supervisor collector in the background for aggregated signals.
 	if o.codedSupervisor == nil {
-		o.codedSupervisor = supervisor.NewCodedSupervisor(o.session.CodedSupervisorPath(), worktrees, workerLogs, 5*time.Second)
+		o.codedSupervisor = supervisor.NewCodedSupervisor(o.session.CodedSupervisorPath(), worktrees, workerLogs, workerTypes, 5*time.Second)
 		o.codedSupervisor.Start()
 	}
 
