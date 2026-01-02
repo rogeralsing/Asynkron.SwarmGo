@@ -2,6 +2,7 @@ package agents
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/asynkron/Asynkron.SwarmGo/internal/config"
@@ -24,52 +25,97 @@ type ParsedMessage struct {
 	Text string
 }
 
+// SupervisorModeler allows a CLI to override the model used for the supervisor agent.
+// If not implemented, the regular Model(index) method is used instead.
+type SupervisorModeler interface {
+	SupervisorModel() (apiModel string, display string)
+}
+
 // NewCLI returns an implementation for the given agent type.
 func NewCLI(agent config.AgentType) CLI {
 	switch agent {
 	case config.AgentClaude:
 		return claudeCLI{}
 	case config.AgentCodex:
-		return codexCLI{}
+		return &codexCLI{}
 	case config.AgentCopilot:
 		return copilotCLI{}
 	case config.AgentGemini:
 		return geminiCLI{}
 	default:
-		return codexCLI{}
+		return &codexCLI{}
 	}
 }
 
-type codexCLI struct{}
+type codexCLI struct {
+	doMode bool
+}
 
-func (codexCLI) Name() string    { return "Codex" }
-func (codexCLI) Command() string { return "codex" }
-func (codexCLI) UseStdin() bool  { return false }
-func (codexCLI) Model(i int) (string, string) {
+func (*codexCLI) Name() string    { return "Codex" }
+func (*codexCLI) Command() string { return "codex" }
+func (*codexCLI) UseStdin() bool  { return false }
+func (*codexCLI) SupervisorModel() (string, string) {
+	return "gpt-5.1-codex-mini", "5.1-mini"
+}
+func (*codexCLI) Model(i int) (string, string) {
 	models := []string{"gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.2"}
 	short := []string{"5.2-cdx", "5.1-max", "5.2"}
 	idx := i % len(models)
 	return models[idx], short[idx]
 }
-func (c codexCLI) BuildArgs(prompt string, model string) []string {
+func (*codexCLI) BuildArgs(prompt string, model string) []string {
 	args := []string{"exec", prompt, "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
 	return args
 }
-func (codexCLI) Parse(line string) []ParsedMessage {
+func (c *codexCLI) Parse(line string) []ParsedMessage {
 	if strings.TrimSpace(line) == "" {
 		return nil
 	}
-	trim := strings.TrimSpace(line)
+	clean := stripANSI(line)
+	trim := strings.TrimSpace(clean)
 	switch trim {
 	case "thinking":
+		c.doMode = false
 		return []ParsedMessage{{Kind: events.MessageSay, Text: "[thinking]"}}
 	case "exec":
+		c.doMode = true
 		return []ParsedMessage{{Kind: events.MessageDo, Text: "[exec]"}}
 	default:
-		return []ParsedMessage{{Kind: events.MessageSay, Text: line}}
+		kind := codexClassify(trim)
+		if c.doMode {
+			kind = events.MessageDo
+		}
+		return []ParsedMessage{{Kind: kind, Text: clean}}
+	}
+}
+
+func stripANSI(s string) string {
+	if strings.IndexByte(s, '\x1b') == -1 {
+		return s
+	}
+	return ansiRegexp.ReplaceAllString(s, "")
+}
+
+func codexClassify(trim string) events.AgentMessageKind {
+	lower := strings.ToLower(trim)
+	switch {
+	case strings.HasPrefix(trim, "$ "):
+		return events.MessageDo
+	case strings.HasPrefix(lower, "stdout:"):
+		return events.MessageSee
+	case strings.HasPrefix(lower, "stderr:"):
+		return events.MessageSee
+	case strings.HasPrefix(lower, "exit code"):
+		return events.MessageSee
+	case strings.HasPrefix(lower, "result:"):
+		return events.MessageSee
+	case strings.HasPrefix(lower, "output:"):
+		return events.MessageSee
+	default:
+		return events.MessageSay
 	}
 }
 
@@ -135,12 +181,13 @@ type geminiCLI struct{}
 func (geminiCLI) Name() string               { return "Gemini" }
 func (geminiCLI) Command() string            { return "gemini" }
 func (geminiCLI) UseStdin() bool             { return false }
-func (geminiCLI) Model(int) (string, string) { return "gemini-2.0-flash-exp", "flash" }
+func (geminiCLI) Model(int) (string, string) { return "", "" }
 func (geminiCLI) BuildArgs(prompt string, model string) []string {
-	if model == "" {
-		model = "gemini-2.0-flash-exp"
+	args := []string{prompt, "--yolo", "--output-format", "stream-json"}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
-	return []string{prompt, "--yolo", "--output-format", "stream-json", "--model", model}
+	return args
 }
 func (geminiCLI) Parse(line string) []ParsedMessage {
 	trim := strings.TrimSpace(line)
@@ -168,6 +215,22 @@ func (geminiCLI) Parse(line string) []ParsedMessage {
 		if out, ok := root["output"].(string); ok && strings.TrimSpace(out) != "" {
 			return []ParsedMessage{{Kind: events.MessageSee, Text: strings.TrimSpace(out)}}
 		}
+		status, _ := root["status"].(string)
+		toolID, _ := root["tool_id"].(string)
+		if errObj, ok := root["error"].(map[string]any); ok {
+			if msg, ok := errObj["message"].(string); ok {
+				return []ParsedMessage{{Kind: events.MessageSee, Text: msg}}
+			}
+		}
+		summary := "tool_result"
+		if toolID != "" && status != "" {
+			summary = fmt.Sprintf("tool_result %s (%s)", toolID, status)
+		} else if toolID != "" {
+			summary = fmt.Sprintf("tool_result %s", toolID)
+		} else if status != "" {
+			summary = fmt.Sprintf("tool_result (%s)", status)
+		}
+		return []ParsedMessage{{Kind: events.MessageSee, Text: summary}}
 	case "result":
 		if status, _ := root["status"].(string); status == "error" {
 			if errObj, ok := root["error"].(map[string]any); ok {
