@@ -291,7 +291,7 @@ func (a *Agent) supervisorSummary(text string) string {
 	lower := strings.ToLower(text)
 	for i, path := range a.workerLogPaths {
 		if strings.Contains(text, path) {
-			return fmt.Sprintf("Reading logs for Worker %d", i+1)
+			return fmt.Sprintf("📜 Reading logs for Worker %d", i+1)
 		}
 	}
 
@@ -302,25 +302,25 @@ func (a *Agent) supervisorSummary(text string) string {
 
 		switch {
 		case strings.Contains(lower, "git status"):
-			return fmt.Sprintf("Checking git status for Worker %d", i+1)
+			return fmt.Sprintf("🔍 Checking git status for Worker %d", i+1)
 		case strings.Contains(lower, "git diff"):
-			return fmt.Sprintf("Checking git diff for Worker %d", i+1)
+			return fmt.Sprintf("📄 Checking git diff for Worker %d", i+1)
 		case strings.Contains(lower, "git log"):
-			return fmt.Sprintf("Checking git log for Worker %d", i+1)
+			return fmt.Sprintf("🧭 Checking git log for Worker %d", i+1)
 		case strings.Contains(lower, "git cherry-pick"):
-			return fmt.Sprintf("Cherry-picking commits for Worker %d", i+1)
+			return fmt.Sprintf("🍒 Cherry-picking commits for Worker %d", i+1)
 		case strings.Contains(lower, "git merge"):
-			return fmt.Sprintf("Merging changes for Worker %d", i+1)
+			return fmt.Sprintf("🧵 Merging changes for Worker %d", i+1)
 		case strings.Contains(lower, "glob"):
-			return fmt.Sprintf("Searching files for Worker %d", i+1)
+			return fmt.Sprintf("🔎 Searching files for Worker %d", i+1)
 		case strings.Contains(lower, "grep"):
-			return fmt.Sprintf("Searching code for Worker %d", i+1)
+			return fmt.Sprintf("🔎 Searching code for Worker %d", i+1)
 		case strings.Contains(lower, "test"):
-			return fmt.Sprintf("Running tests for Worker %d", i+1)
+			return fmt.Sprintf("🧪 Running tests for Worker %d", i+1)
 		case strings.Contains(lower, "read"):
-			return fmt.Sprintf("Reading file for Worker %d", i+1)
+			return fmt.Sprintf("📖 Reading file for Worker %d", i+1)
 		default:
-			return fmt.Sprintf("Inspecting for Worker %d", i+1)
+			return fmt.Sprintf("👀 Inspecting for Worker %d", i+1)
 		}
 	}
 
