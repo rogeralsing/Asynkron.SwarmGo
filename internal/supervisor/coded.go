@@ -25,6 +25,7 @@ type CodedSupervisor struct {
 	outputPath string
 	workers    []workerInfo
 	interval   time.Duration
+	startTime  time.Time
 
 	mu     sync.Mutex
 	state  map[int]*workerState
@@ -99,7 +100,7 @@ const (
 )
 
 // NewCodedSupervisor returns a background collector. Call Start to begin polling, and Close to stop.
-func NewCodedSupervisor(outputPath string, worktrees []string, workerLogs []string, agentTypes []config.AgentType, interval time.Duration) *CodedSupervisor {
+func NewCodedSupervisor(outputPath string, worktrees []string, workerLogs []string, agentTypes []config.AgentType, startTime time.Time, interval time.Duration) *CodedSupervisor {
 	if interval <= 0 {
 		interval = defaultInterval
 	}
@@ -140,6 +141,7 @@ func NewCodedSupervisor(outputPath string, worktrees []string, workerLogs []stri
 		offset:     offsets,
 		ctx:        ctx,
 		cancel:     cancel,
+		startTime:  startTime,
 	}
 }
 
@@ -206,8 +208,11 @@ func (c *CodedSupervisor) collectGit(w workerInfo) {
 	if err == nil {
 		snap.Untracked = splitLines(untracked)
 	}
-	commits, err := runGit(ctx, w.Worktree, "log --oneline -5")
-	if err == nil {
+	logCmd := "log --oneline -5"
+	if !c.startTime.IsZero() {
+		logCmd = fmt.Sprintf("log --since=\"%s\" --oneline --max-count=20", c.startTime.Format(time.RFC3339))
+	}
+	if commits, err := runGit(ctx, w.Worktree, logCmd); err == nil {
 		snap.RecentCommits = splitLines(commits)
 	}
 

@@ -155,7 +155,7 @@ func (o *Orchestrator) startWorkers(ctx context.Context, worktrees []string) ([]
 func (o *Orchestrator) startSupervisor(ctx context.Context, worktrees, workerLogs []string, workerTypes []config.AgentType) (*agents.Agent, error) {
 	// Start coded supervisor collector in the background for aggregated signals.
 	if o.codedSupervisor == nil {
-		o.codedSupervisor = supervisor.NewCodedSupervisor(o.session.CodedSupervisorPath(), worktrees, workerLogs, workerTypes, 5*time.Second)
+		o.codedSupervisor = supervisor.NewCodedSupervisor(o.session.CodedSupervisorPath(), worktrees, workerLogs, workerTypes, o.session.Created, 5*time.Second)
 		o.codedSupervisor.Start()
 	}
 
