@@ -115,21 +115,26 @@ func (claudeCLI) Parse(line string) []ParsedMessage {
 			switch obj["type"] {
 			case "text":
 				if text, ok := obj["text"].(string); ok && strings.TrimSpace(text) != "" {
-					out = append(out, ParsedMessage{Kind: events.MessageSay, Text: strings.TrimSpace(text)})
+					out = append(out, ParsedMessage{Kind: events.MessageSay, Text: trimLines(text)})
 				}
 			case "tool_use":
 				name, _ := obj["name"].(string)
-				out = append(out, ParsedMessage{Kind: events.MessageDo, Text: name})
+				input, _ := obj["input"].(map[string]any)
+				out = append(out, ParsedMessage{Kind: events.MessageDo, Text: summarizeClaudeTool(name, input)})
 			}
 		}
 		return out
 	case "user":
-		if result, ok := root["result"].(string); ok && strings.TrimSpace(result) != "" {
-			return []ParsedMessage{{Kind: events.MessageSee, Text: result}}
+		toolResult, _ := root["tool_use_result"].(map[string]any)
+		if stdout, ok := toolResult["stdout"].(string); ok && strings.TrimSpace(stdout) != "" {
+			return []ParsedMessage{{Kind: events.MessageSee, Text: strings.TrimSpace(stdout)}}
+		}
+		if stderr, ok := toolResult["stderr"].(string); ok && strings.TrimSpace(stderr) != "" {
+			return []ParsedMessage{{Kind: events.MessageSee, Text: strings.TrimSpace(stderr)}}
 		}
 	case "result":
 		if result, ok := root["result"].(string); ok && strings.TrimSpace(result) != "" {
-			return []ParsedMessage{{Kind: events.MessageSay, Text: result}}
+			return []ParsedMessage{{Kind: events.MessageSay, Text: trimLines(result)}}
 		}
 	}
 	return []ParsedMessage{{Kind: events.MessageSay, Text: line}}
@@ -182,14 +187,15 @@ func (geminiCLI) Parse(line string) []ParsedMessage {
 	switch typ {
 	case "message":
 		if content, ok := root["content"].(string); ok && strings.TrimSpace(content) != "" {
-			return []ParsedMessage{{Kind: events.MessageSay, Text: content}}
+			return []ParsedMessage{{Kind: events.MessageSay, Text: trimLines(content)}}
 		}
 	case "tool_use":
 		name, _ := root["tool_name"].(string)
-		return []ParsedMessage{{Kind: events.MessageDo, Text: name}}
+		params, _ := root["parameters"].(map[string]any)
+		return []ParsedMessage{{Kind: events.MessageDo, Text: summarizeGeminiTool(name, params)}}
 	case "tool_result":
 		if out, ok := root["output"].(string); ok && strings.TrimSpace(out) != "" {
-			return []ParsedMessage{{Kind: events.MessageSee, Text: out}}
+			return []ParsedMessage{{Kind: events.MessageSee, Text: strings.TrimSpace(out)}}
 		}
 	case "result":
 		if status, _ := root["status"].(string); status == "error" {
@@ -201,4 +207,54 @@ func (geminiCLI) Parse(line string) []ParsedMessage {
 		}
 	}
 	return []ParsedMessage{{Kind: events.MessageSay, Text: line}}
+}
+
+func summarizeClaudeTool(name string, input map[string]any) string {
+	if name == "" {
+		return "tool"
+	}
+	switch name {
+	case "Bash":
+		if cmd, ok := input["command"].(string); ok {
+			return "$ " + cmd
+		}
+	case "Read", "Write", "Edit":
+		if path, ok := input["file_path"].(string); ok {
+			return strings.ToLower(name) + ": " + path
+		}
+	case "Glob", "Grep":
+		if pattern, ok := input["pattern"].(string); ok {
+			return strings.ToLower(name) + ": " + pattern
+		}
+	}
+	return name
+}
+
+func summarizeGeminiTool(name string, params map[string]any) string {
+	if name == "" {
+		return "tool"
+	}
+	switch name {
+	case "run_shell_command", "shell":
+		if cmd, ok := params["command"].(string); ok {
+			return "$ " + cmd
+		}
+	case "read_file", "write_file", "edit_file", "replace":
+		if path, ok := params["file_path"].(string); ok {
+			return strings.ReplaceAll(name, "_", " ") + ": " + path
+		}
+	case "glob", "grep":
+		if pattern, ok := params["pattern"].(string); ok {
+			return name + ": " + pattern
+		}
+	}
+	return name
+}
+
+func trimLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSpace(lines[i])
+	}
+	return strings.Join(lines, "\n")
 }
