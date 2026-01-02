@@ -560,15 +560,24 @@ func (m Model) renderLog() string {
 
 	selectedID := m.itemOrder[m.selected]
 	header := title(selectedID)
-	content := lipgloss.NewStyle().Width(m.view.Width).Height(m.view.Height).Render(m.view.View())
+	contentWidth := m.view.Width - 1
+	if contentWidth < 1 {
+		contentWidth = m.view.Width
+	}
+	content := lipgloss.NewStyle().Width(contentWidth).Height(m.view.Height).Render(m.view.View())
 	scroll := m.renderScrollbar(m.view.Height, m.view.ScrollPercent())
-	content = lipgloss.JoinHorizontal(lipgloss.Top, content, scroll)
+	if contentWidth >= m.view.Width {
+		// If we don't have room for scrollbar, skip it.
+		scroll = ""
+	} else {
+		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scroll)
+	}
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(m.styles.border).
 		Padding(0, 1).
-		Width(m.view.Width + 3).
+		Width(m.view.Width + 2).
 		Height(m.view.Height + 2)
 	return box.Render(header + "\n" + content)
 }
