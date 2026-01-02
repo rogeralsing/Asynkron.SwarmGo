@@ -890,7 +890,7 @@ func (m *Model) isAtBottom() bool {
 	if m.view.Height == 0 {
 		return true
 	}
-	return m.view.AtBottom()
+	return m.view.AtBottom() || m.view.PastBottom()
 }
 
 func (m *Model) anyPendingDo() bool {
