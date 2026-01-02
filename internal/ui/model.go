@@ -11,6 +11,7 @@ import (
 	"github.com/asynkron/Asynkron.SwarmGo/internal/config"
 	"github.com/asynkron/Asynkron.SwarmGo/internal/events"
 	"github.com/asynkron/Asynkron.SwarmGo/internal/session"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -35,6 +36,7 @@ type Model struct {
 	todoPath     string
 	todo         string
 	view         viewport.Model
+	spinner      spinner.Model
 	ready        bool
 	styles       theme
 	mdRenderer   *glamour.TermRenderer
@@ -72,6 +74,9 @@ type logEntry struct {
 func New(sess *session.Session, opts config.Options, events <-chan events.Event) Model {
 	view := viewport.New(80, 20)
 	view.MouseWheelEnabled = true
+	theme := defaultTheme()
+	sp := spinner.New()
+	sp.Style = lipgloss.NewStyle().Foreground(theme.accent)
 
 	m := Model{
 		session:      sess,
@@ -81,9 +86,10 @@ func New(sess *session.Session, opts config.Options, events <-chan events.Event)
 		agents:       make(map[string]*agentView),
 		logs:         make(map[string]*logBuffer),
 		view:         view,
-		styles:       defaultTheme(),
+		styles:       theme,
 		mouseEnabled: true,
 		hasCoded:     true,
+		spinner:      sp,
 	}
 	// Default to showing the todo panel first so something useful is visible.
 	if len(m.itemOrder) > 1 {
@@ -99,7 +105,7 @@ func New(sess *session.Session, opts config.Options, events <-chan events.Event)
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForEvent(m.events), tea.EnableMouseCellMotion)
+	return tea.Batch(waitForEvent(m.events), tea.EnableMouseCellMotion, spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -171,6 +177,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case events.Event:
 		m = m.handleEvent(msg)
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	}
 
 	cmds := []tea.Cmd{waitForEvent(m.events)}
@@ -184,7 +194,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	if !m.ready {
-		return "Starting swarm..."
+		msg := lipgloss.NewStyle().Foreground(m.styles.accent).Render("Booting swarm... " + m.spinner.View())
+		return lipgloss.NewStyle().Width(m.width).Height(m.height).Align(lipgloss.Center).Render(msg)
 	}
 
 	header := m.renderHeader()
