@@ -42,6 +42,7 @@ type agentView struct {
 	Name     string
 	Kind     string
 	Model    string
+	LogPath  string
 	Running  bool
 	ExitCode int
 }
@@ -56,7 +57,7 @@ func New(sess *session.Session, opts config.Options, events <-chan events.Event)
 	view := viewport.New(80, 20)
 	view.HighPerformanceRendering = true
 
-	return Model{
+	m := Model{
 		session:   sess,
 		opts:      opts,
 		events:    events,
@@ -66,6 +67,17 @@ func New(sess *session.Session, opts config.Options, events <-chan events.Event)
 		view:      view,
 		styles:    defaultTheme(),
 	}
+	// Default to showing the todo panel first so something useful is visible.
+	if len(m.itemOrder) > 1 {
+		m.selected = 1
+	} else {
+		m.selected = 0
+	}
+	m.width = 80
+	m.height = 24
+	m.resize()
+	m.updateViewport()
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -161,9 +173,7 @@ func (m *Model) handleEvent(ev events.Event) Model {
 	case events.TodoLoaded:
 		m.todo = e.Content
 		m.todoPath = e.Path
-		if m.selected == 1 { // todo item
-			m.updateViewport()
-		}
+		m.updateViewport()
 	}
 
 	m.trimStatus()
