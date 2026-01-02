@@ -32,14 +32,17 @@ func NewSupervisor(worktrees []string, workerLogs []string, repoPath string, cli
 	prompt := prompts.SupervisorPrompt(worktrees, workerLogs, repoPath, autopilot, 0)
 	apiModel, displayModel := cli.Model(int(time.Now().UnixNano()))
 	return &Agent{
-		ID:      "supervisor",
-		Name:    "Supervisor",
-		Prompt:  prompt,
-		Workdir: repoPath,
-		LogPath: logPath,
-		Model:   apiModel,
-		Display: displayModel,
-		CLI:     cli,
-		events:  events,
+		ID:              "supervisor",
+		Name:            "Supervisor",
+		Prompt:          prompt,
+		Workdir:         repoPath,
+		LogPath:         logPath,
+		Model:           apiModel,
+		Display:         displayModel,
+		CLI:             cli,
+		events:          events,
+		isSupervisor:    true,
+		workerWorktrees: worktrees,
+		workerLogPaths:  workerLogs,
 	}
 }

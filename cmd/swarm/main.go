@@ -70,7 +70,7 @@ func main() {
 		close(eventCh)
 	}()
 
-	program := tea.NewProgram(ui.New(sess, opts, eventCh), tea.WithAltScreen())
+	program := tea.NewProgram(ui.New(sess, opts, eventCh), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "ui error: %v\n", err)
 	}
@@ -119,7 +119,7 @@ func parseAgentType(value string) (config.AgentType, error) {
 
 func runDetect() {
 	statuses := detector.DetectAll()
-	fmt.Println("Detecting CLI agents...\n")
+	fmt.Println("Detecting CLI agents...")
 	for _, s := range statuses {
 		installed := "no"
 		if s.Installed {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -28,11 +29,14 @@ type Agent struct {
 	events   chan<- events.Event
 	restarts int
 
-	cmd        *exec.Cmd
-	logFile    *os.File
-	mu         sync.Mutex
-	tailCancel context.CancelFunc
-	tailWG     sync.WaitGroup
+	cmd             *exec.Cmd
+	logFile         *os.File
+	mu              sync.Mutex
+	tailCancel      context.CancelFunc
+	tailWG          sync.WaitGroup
+	isSupervisor    bool
+	workerWorktrees []string
+	workerLogPaths  []string
 }
 
 // Start launches the agent process and begins streaming output.
@@ -223,11 +227,29 @@ func (a *Agent) tailFile(ctx context.Context) {
 			line, err := reader.ReadString('\n')
 			if line != "" {
 				trimmed := strings.TrimRight(line, "\r\n")
-				msgs := a.CLI.Parse(trimmed)
-				if len(msgs) == 0 && strings.TrimSpace(trimmed) != "" {
-					msgs = []ParsedMessage{{Kind: events.MessageSay, Text: trimmed}}
+				clean := cleanLine(trimmed)
+				if strings.TrimSpace(clean) == "" {
+					continue
+				}
+				msgs := a.CLI.Parse(clean)
+				if msgs == nil {
+					continue
 				}
 				for _, msg := range msgs {
+					if a.isSupervisor {
+						// Skip See/Do noise; summarize activity instead.
+						if msg.Kind == events.MessageSee {
+							continue
+						}
+						if msg.Kind == events.MessageDo {
+							summary := a.supervisorSummary(msg.Text)
+							if summary == "" {
+								continue
+							}
+							msg.Text = summary
+							msg.Kind = events.MessageSay
+						}
+					}
 					a.emit(events.AgentLine{ID: a.ID, Kind: msg.Kind, Line: msg.Text})
 				}
 			}
@@ -245,4 +267,62 @@ func (a *Agent) tailFile(ctx context.Context) {
 		// Re-open on next loop iteration to mimic tail -F.
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+var ansiRegexp = regexp.MustCompile("\x1B\\[[0-9;]*[A-Za-z]")
+
+func cleanLine(input string) string {
+	stripped := ansiRegexp.ReplaceAllString(input, "")
+	var b strings.Builder
+	for _, r := range stripped {
+		switch r {
+		case '\t':
+			b.WriteString("    ")
+		default:
+			if r >= 32 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
+func (a *Agent) supervisorSummary(text string) string {
+	lower := strings.ToLower(text)
+	for i, path := range a.workerLogPaths {
+		if strings.Contains(text, path) {
+			return fmt.Sprintf("Reading logs for Worker %d", i+1)
+		}
+	}
+
+	for i, wt := range a.workerWorktrees {
+		if !strings.Contains(text, wt) {
+			continue
+		}
+
+		switch {
+		case strings.Contains(lower, "git status"):
+			return fmt.Sprintf("Checking git status for Worker %d", i+1)
+		case strings.Contains(lower, "git diff"):
+			return fmt.Sprintf("Checking git diff for Worker %d", i+1)
+		case strings.Contains(lower, "git log"):
+			return fmt.Sprintf("Checking git log for Worker %d", i+1)
+		case strings.Contains(lower, "git cherry-pick"):
+			return fmt.Sprintf("Cherry-picking commits for Worker %d", i+1)
+		case strings.Contains(lower, "git merge"):
+			return fmt.Sprintf("Merging changes for Worker %d", i+1)
+		case strings.Contains(lower, "glob"):
+			return fmt.Sprintf("Searching files for Worker %d", i+1)
+		case strings.Contains(lower, "grep"):
+			return fmt.Sprintf("Searching code for Worker %d", i+1)
+		case strings.Contains(lower, "test"):
+			return fmt.Sprintf("Running tests for Worker %d", i+1)
+		case strings.Contains(lower, "read"):
+			return fmt.Sprintf("Reading file for Worker %d", i+1)
+		default:
+			return fmt.Sprintf("Inspecting for Worker %d", i+1)
+		}
+	}
+
+	return ""
 }

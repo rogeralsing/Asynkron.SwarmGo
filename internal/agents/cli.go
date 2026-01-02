@@ -88,12 +88,8 @@ func (claudeCLI) BuildArgs(prompt string, model string) []string {
 	return args
 }
 func (claudeCLI) Parse(line string) []ParsedMessage {
-	trim := strings.TrimSpace(line)
-	if trim == "" {
+	if strings.TrimSpace(line) == "" {
 		return nil
-	}
-	if !strings.HasPrefix(trim, "{") {
-		return []ParsedMessage{{Kind: events.MessageSay, Text: line}}
 	}
 
 	var root map[string]any
@@ -104,40 +100,15 @@ func (claudeCLI) Parse(line string) []ParsedMessage {
 	typ, _ := root["type"].(string)
 	switch typ {
 	case "assistant":
-		msg, _ := root["message"].(map[string]any)
-		content, _ := msg["content"].([]any)
-		var out []ParsedMessage
-		for _, item := range content {
-			obj, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			switch obj["type"] {
-			case "text":
-				if text, ok := obj["text"].(string); ok && strings.TrimSpace(text) != "" {
-					out = append(out, ParsedMessage{Kind: events.MessageSay, Text: trimLines(text)})
-				}
-			case "tool_use":
-				name, _ := obj["name"].(string)
-				input, _ := obj["input"].(map[string]any)
-				out = append(out, ParsedMessage{Kind: events.MessageDo, Text: summarizeClaudeTool(name, input)})
-			}
-		}
-		return out
+		return parseClaudeAssistant(root)
 	case "user":
-		toolResult, _ := root["tool_use_result"].(map[string]any)
-		if stdout, ok := toolResult["stdout"].(string); ok && strings.TrimSpace(stdout) != "" {
-			return []ParsedMessage{{Kind: events.MessageSee, Text: strings.TrimSpace(stdout)}}
-		}
-		if stderr, ok := toolResult["stderr"].(string); ok && strings.TrimSpace(stderr) != "" {
-			return []ParsedMessage{{Kind: events.MessageSee, Text: strings.TrimSpace(stderr)}}
-		}
+		return parseClaudeToolResult(root)
 	case "result":
 		if result, ok := root["result"].(string); ok && strings.TrimSpace(result) != "" {
-			return []ParsedMessage{{Kind: events.MessageSay, Text: trimLines(result)}}
+			return []ParsedMessage{{Kind: events.MessageSay, Text: result}}
 		}
 	}
-	return []ParsedMessage{{Kind: events.MessageSay, Text: line}}
+	return nil
 }
 
 type copilotCLI struct{}
@@ -211,7 +182,7 @@ func (geminiCLI) Parse(line string) []ParsedMessage {
 
 func summarizeClaudeTool(name string, input map[string]any) string {
 	if name == "" {
-		return "tool"
+		return "Unknown tool"
 	}
 	switch name {
 	case "Bash":
@@ -255,6 +226,61 @@ func trimLines(s string) string {
 	lines := strings.Split(s, "\n")
 	for i := range lines {
 		lines[i] = strings.TrimSpace(lines[i])
+	}
+	return strings.Join(lines, "\n")
+}
+
+func parseClaudeAssistant(root map[string]any) []ParsedMessage {
+	msg, ok := root["message"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	content, ok := msg["content"].([]any)
+	if !ok {
+		return nil
+	}
+	var out []ParsedMessage
+	for _, item := range content {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch obj["type"] {
+		case "text":
+			if text, ok := obj["text"].(string); ok {
+				trimmed := trimTrailingWhitespacePerLine(text)
+				if strings.TrimSpace(trimmed) != "" {
+					out = append(out, ParsedMessage{Kind: events.MessageSay, Text: trimmed})
+				}
+			}
+		case "tool_use":
+			name, _ := obj["name"].(string)
+			input, _ := obj["input"].(map[string]any)
+			out = append(out, ParsedMessage{Kind: events.MessageDo, Text: summarizeClaudeTool(name, input)})
+		}
+	}
+	return out
+}
+
+func parseClaudeToolResult(root map[string]any) []ParsedMessage {
+	result, ok := root["tool_use_result"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	var out []ParsedMessage
+	if stdout, ok := result["stdout"].(string); ok && strings.TrimSpace(stdout) != "" {
+		out = append(out, ParsedMessage{Kind: events.MessageSee, Text: strings.TrimSpace(stdout)})
+	}
+	if stderr, ok := result["stderr"].(string); ok && strings.TrimSpace(stderr) != "" {
+		out = append(out, ParsedMessage{Kind: events.MessageSee, Text: strings.TrimSpace(stderr)})
+	}
+	return out
+}
+
+func trimTrailingWhitespacePerLine(content string) string {
+	lines := strings.Split(content, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
 	}
 	return strings.Join(lines, "\n")
 }

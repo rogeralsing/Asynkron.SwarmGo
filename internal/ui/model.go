@@ -12,6 +12,7 @@ import (
 	"github.com/asynkron/Asynkron.SwarmGo/internal/session"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -21,20 +22,24 @@ type Model struct {
 	opts    config.Options
 	events  <-chan events.Event
 
-	width     int
-	height    int
-	phase     string
-	remaining time.Duration
-	status    []string
-	selected  int
-	itemOrder []string // "session", "todo", agent IDs
-	agents    map[string]*agentView
-	logs      map[string]*logBuffer
-	todoPath  string
-	todo      string
-	view      viewport.Model
-	ready     bool
-	styles    theme
+	width        int
+	height       int
+	phase        string
+	remaining    time.Duration
+	status       []string
+	selected     int
+	itemOrder    []string // "session", "todo", agent IDs
+	agents       map[string]*agentView
+	logs         map[string]*logBuffer
+	todoPath     string
+	todo         string
+	view         viewport.Model
+	ready        bool
+	styles       theme
+	mdRenderer   *glamour.TermRenderer
+	mdWidth      int
+	listWidth    int
+	mouseOverLog bool
 }
 
 type agentView struct {
@@ -63,7 +68,7 @@ type logEntry struct {
 // New returns a ready-to-run UI model.
 func New(sess *session.Session, opts config.Options, events <-chan events.Event) Model {
 	view := viewport.New(80, 20)
-	view.HighPerformanceRendering = true
+	view.MouseWheelEnabled = true
 
 	m := Model{
 		session:   sess,
@@ -93,11 +98,42 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	skipViewport := false
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
+	case tea.MouseMsg:
+		m.mouseOverLog = msg.X > m.listWidth
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			if msg.X <= m.listWidth {
+				if m.selected > 0 {
+					m.selected--
+					m.updateViewport()
+				}
+				skipViewport = true
+			} else {
+				m.view.LineUp(3)
+				skipViewport = true
+			}
+		case tea.MouseWheelDown:
+			if msg.X <= m.listWidth {
+				if m.selected < len(m.itemOrder)-1 {
+					m.selected++
+					m.updateViewport()
+				}
+				skipViewport = true
+			} else {
+				m.view.LineDown(3)
+				skipViewport = true
+			}
+		case tea.MouseMotion:
+			// update hover only
+			skipViewport = true
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -123,8 +159,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	cmds := []tea.Cmd{waitForEvent(m.events)}
 	var cmd tea.Cmd
-	m.view, cmd = m.view.Update(msg)
-	cmds = append(cmds, cmd)
+	if !skipViewport {
+		m.view, cmd = m.view.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -175,6 +213,9 @@ func (m *Model) handleEvent(ev events.Event) Model {
 		buf := m.ensureLog(e.ID)
 		buf.append(logEntry{Kind: e.Kind, Text: e.Line})
 		m.updateViewport()
+		if m.selected < len(m.itemOrder) && m.itemOrder[m.selected] == e.ID && !m.mouseOverLog {
+			m.view.GotoBottom()
+		}
 	case events.StatusMessage:
 		m.status = append(m.status, e.Message)
 	case events.PhaseChanged:
@@ -218,6 +259,7 @@ func (m *Model) resize() {
 		return
 	}
 	listWidth := 36
+	m.listWidth = listWidth
 	logWidth := m.width - listWidth - 2
 	logHeight := m.height - 6
 	if logWidth < 20 {
@@ -236,17 +278,18 @@ func (m *Model) updateViewport() {
 		return
 	}
 	id := m.itemOrder[m.selected]
+	style := lipgloss.NewStyle().Width(m.view.Width)
 	switch id {
 	case "session":
 		content := m.renderSessionInfo()
-		m.view.SetContent(content)
+		m.view.SetContent(style.Render(content))
 	case "todo":
-		m.view.SetContent(m.loadTodoContent())
+		m.view.SetContent(style.Render(m.renderMarkdown(m.loadTodoContent())))
 	default:
 		if buf, ok := m.logs[id]; ok {
-			m.view.SetContent(buf.content())
+			m.view.SetContent(style.Render(m.renderAgentLog(buf)))
 		} else {
-			m.view.SetContent("waiting for output...")
+			m.view.SetContent(style.Render("waiting for output..."))
 		}
 	}
 }
@@ -295,9 +338,17 @@ func (m Model) renderList() string {
 			var state string
 			if ag.Running {
 				frame := spinnerFrames[ag.Spinner%len(spinnerFrames)]
-				state = lipgloss.NewStyle().Foreground(m.styles.running).Render(frame)
+				if selected {
+					state = frame
+				} else {
+					state = lipgloss.NewStyle().Foreground(m.styles.running).Render(frame)
+				}
 			} else {
-				state = lipgloss.NewStyle().Foreground(m.styles.error).Render("○")
+				if selected {
+					state = "○"
+				} else {
+					state = lipgloss.NewStyle().Foreground(m.styles.error).Render("○")
+				}
 			}
 			meta := fmt.Sprintf("%s %s", ag.Kind, ag.Model)
 			rows = append(rows, m.renderRow(ag.Name, meta, selected, state))
@@ -313,14 +364,20 @@ func (m Model) renderList() string {
 
 func (m Model) renderRow(name, meta string, selected bool, prefix string) string {
 	row := name
+	if selected {
+		if meta != "" {
+			row += "  " + meta
+		}
+		if prefix != "" {
+			row = prefix + " " + row
+		}
+		return lipgloss.NewStyle().Bold(true).Background(m.styles.focus).Foreground(lipgloss.Color("#000000")).Render(row)
+	}
 	if meta != "" {
 		row += "  " + lipgloss.NewStyle().Foreground(m.styles.dim).Render(meta)
 	}
 	if prefix != "" {
 		row = prefix + " " + row
-	}
-	if selected {
-		return lipgloss.NewStyle().Bold(true).Background(m.styles.focus).Foreground(lipgloss.Color("#000000")).Render(row)
 	}
 	return row
 }
@@ -332,35 +389,7 @@ func (m Model) renderLog() string {
 
 	selectedID := m.itemOrder[m.selected]
 	header := title(selectedID)
-
-	// Special-case todo so it always renders from disk, even if viewport glitches.
-	if selectedID == "todo" {
-		content := m.loadTodoContent()
-		box := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(m.styles.border).
-			Padding(0, 1).
-			Width(m.view.Width + 2).
-			Height(m.view.Height + 2)
-		body := lipgloss.NewStyle().Width(m.view.Width).Render(content)
-		return box.Render(header + "\n" + body)
-	}
-
-	// If an agent is selected, render its buffer directly to avoid viewport state glitches.
-	if selectedID != "session" {
-		content := "waiting for output..."
-		if buf, ok := m.logs[selectedID]; ok {
-			content = m.renderAgentLog(buf)
-		}
-		box := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(m.styles.border).
-			Padding(0, 1).
-			Width(m.view.Width + 2).
-			Height(m.view.Height + 2)
-		body := lipgloss.NewStyle().Width(m.view.Width).Render(content)
-		return box.Render(header + "\n" + body)
-	}
+	content := lipgloss.NewStyle().Width(m.view.Width).Height(m.view.Height).Render(m.view.View())
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -368,8 +397,7 @@ func (m Model) renderLog() string {
 		Padding(0, 1).
 		Width(m.view.Width + 2).
 		Height(m.view.Height + 2)
-	body := lipgloss.NewStyle().Height(m.view.Height).Render(m.view.View())
-	return box.Render(header + "\n" + body)
+	return box.Render(header + "\n" + content)
 }
 
 func (m Model) renderSessionInfo() string {
@@ -447,7 +475,7 @@ func (m *Model) renderAgentLog(buf *logBuffer) string {
 		case events.MessageSee:
 			lines = append(lines, lipgloss.NewStyle().Foreground(m.styles.see).Render(l.Text))
 		default:
-			lines = append(lines, lipgloss.NewStyle().Foreground(m.styles.say).Render(l.Text))
+			lines = append(lines, m.renderMarkdown(l.Text))
 		}
 	}
 	if len(lines) == 0 {
@@ -467,6 +495,31 @@ func waitForEvent(ch <-chan events.Event) tea.Cmd {
 		}
 		return ev
 	}
+}
+
+func (m *Model) renderMarkdown(text string) string {
+	width := m.view.Width
+	if width <= 0 {
+		width = 80
+	}
+	if m.mdRenderer == nil || m.mdWidth != width {
+		r, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(width),
+		)
+		if err == nil {
+			m.mdRenderer = r
+			m.mdWidth = width
+		}
+	}
+	if m.mdRenderer == nil {
+		return text
+	}
+	out, err := m.mdRenderer.Render(text)
+	if err != nil {
+		return text
+	}
+	return strings.TrimRight(out, "\n")
 }
 
 func title(s string) string {
