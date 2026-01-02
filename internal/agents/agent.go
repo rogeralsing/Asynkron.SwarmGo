@@ -224,15 +224,18 @@ func (a *Agent) tailFile(ctx context.Context) {
 			if line != "" {
 				a.emit(events.AgentLine{ID: a.ID, Line: strings.TrimRight(line, "\r\n")})
 			}
-			if err != nil {
-				if err == io.EOF {
-					time.Sleep(50 * time.Millisecond)
-					continue
-				}
-				break
+			if err == nil {
+				continue
 			}
+			if err == io.EOF {
+				// Wait for more data in same file.
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			break
 		}
 		_ = f.Close()
+		// Re-open on next loop iteration to mimic tail -F.
 		time.Sleep(100 * time.Millisecond)
 	}
 }
