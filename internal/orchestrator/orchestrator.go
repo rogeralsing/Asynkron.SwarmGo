@@ -12,6 +12,7 @@ import (
 	"github.com/asynkron/Asynkron.SwarmGo/internal/config"
 	"github.com/asynkron/Asynkron.SwarmGo/internal/events"
 	"github.com/asynkron/Asynkron.SwarmGo/internal/session"
+	"github.com/asynkron/Asynkron.SwarmGo/internal/supervisor"
 	"github.com/asynkron/Asynkron.SwarmGo/internal/worktree"
 )
 
@@ -24,6 +25,8 @@ type Orchestrator struct {
 	mu      sync.Mutex
 	agents  []*agents.Agent
 	started bool
+
+	codedSupervisor *supervisor.CodedSupervisor
 }
 
 // New constructs a new Orchestrator.
@@ -41,6 +44,11 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		return fmt.Errorf("orchestrator already running")
 	}
 	o.started = true
+	defer func() {
+		if o.codedSupervisor != nil {
+			o.codedSupervisor.Close()
+		}
+	}()
 
 	o.emit(events.StatusMessage{Message: fmt.Sprintf("Session: %s", o.session.ID)})
 	o.emit(events.StatusMessage{Message: fmt.Sprintf("Repository: %s", o.opts.Repo)})
@@ -143,8 +151,14 @@ func (o *Orchestrator) startWorkers(ctx context.Context, worktrees []string) ([]
 }
 
 func (o *Orchestrator) startSupervisor(ctx context.Context, worktrees, workerLogs []string) (*agents.Agent, error) {
+	// Start coded supervisor collector in the background for aggregated signals.
+	if o.codedSupervisor == nil {
+		o.codedSupervisor = supervisor.NewCodedSupervisor(o.session.CodedSupervisorPath(), worktrees, workerLogs, 5*time.Second)
+		o.codedSupervisor.Start()
+	}
+
 	cli := agents.NewCLI(o.opts.Supervisor)
-	supervisor := agents.NewSupervisor(worktrees, workerLogs, o.opts.Repo, cli, o.session.SupervisorLogPath(), o.opts.Autopilot, o.events)
+	supervisor := agents.NewSupervisor(worktrees, workerLogs, o.opts.Repo, o.session.CodedSupervisorPath(), cli, o.session.SupervisorLogPath(), o.opts.Autopilot, o.events)
 	if err := supervisor.Start(ctx); err != nil {
 		return nil, err
 	}

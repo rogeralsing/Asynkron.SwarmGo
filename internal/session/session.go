@@ -54,6 +54,11 @@ func (s *Session) SupervisorLogPath() string {
 	return filepath.Join(s.Path, "supervisor.log")
 }
 
+// CodedSupervisorPath returns the aggregated supervisor JSON path.
+func (s *Session) CodedSupervisorPath() string {
+	return filepath.Join(s.Path, "coded-supervisor.json")
+}
+
 func generateID() (string, error) {
 	var buf [4]byte
 	if _, err := rand.Read(buf[:]); err != nil {

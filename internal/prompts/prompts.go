@@ -91,7 +91,7 @@ Instead, recover your previous work:
 }
 
 // SupervisorPrompt mirrors the supervisor prompt for both modes.
-func SupervisorPrompt(worktreePaths []string, workerLogPaths []string, repoPath string, autopilot bool, restartCount int) string {
+func SupervisorPrompt(worktreePaths []string, workerLogPaths []string, repoPath string, codedSupervisorPath string, autopilot bool, restartCount int) string {
 	workerList := make([]string, len(worktreePaths))
 	for i, wt := range worktreePaths {
 		workerList[i] = fmt.Sprintf("- Worker %d: %s", i+1, wt)
@@ -144,9 +144,12 @@ DO NOT:
 
 %s
 
+Coded supervisor summary: %s
+Treat this file like the worker logs and read it for up-to-date git status and test signals.
+
 START NOW: Begin monitoring immediately. Print status summary every cycle.
 When all workers have finished, provide a final summary and exit.
-`, restart, strings.Join(workerList, "\n"), strings.Join(logList, "\n"))
+`, restart, strings.Join(workerList, "\n"), strings.Join(logList, "\n"), codedSupervisorPath)
 	}
 
 	return fmt.Sprintf(`
@@ -211,6 +214,9 @@ Only exit AFTER Phase 3 is complete.
 
 Path: %s
 
+Coded supervisor summary: %s
+Treat this file like the worker logs and read it for up-to-date git status and test signals.
+
 START NOW: Begin Phase 1 loop immediately. Print status table every 30 seconds.
-`, restart, repoPath, strings.Join(workerList, "\n"), strings.Join(logList, "\n"), repoPath)
+`, restart, repoPath, strings.Join(workerList, "\n"), strings.Join(logList, "\n"), repoPath, codedSupervisorPath)
 }

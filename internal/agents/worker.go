@@ -28,8 +28,8 @@ func NewWorker(index int, worktree string, todoFile string, cli CLI, logPath str
 }
 
 // NewSupervisor builds the supervisor agent.
-func NewSupervisor(worktrees []string, workerLogs []string, repoPath string, cli CLI, logPath string, autopilot bool, events chan<- events.Event) *Agent {
-	prompt := prompts.SupervisorPrompt(worktrees, workerLogs, repoPath, autopilot, 0)
+func NewSupervisor(worktrees []string, workerLogs []string, repoPath string, codedPath string, cli CLI, logPath string, autopilot bool, events chan<- events.Event) *Agent {
+	prompt := prompts.SupervisorPrompt(worktrees, workerLogs, repoPath, codedPath, autopilot, 0)
 	apiModel, displayModel := cli.Model(int(time.Now().UnixNano()))
 	return &Agent{
 		ID:              "supervisor",
