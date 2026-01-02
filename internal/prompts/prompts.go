@@ -130,10 +130,15 @@ DO NOT WRITE SCRIPTS. Just run shell commands directly one by one.
 2. After checking all workers:
     * Write a short summary (look for test pass/fail in logs) use markdown format, headers, bullet points etc.
     * When presenting markdown tables to the user, make sure to preformat those with spaces for padding so the table look visually good for a human.
+3. If gh is available and the repo is on GitHub:
+   - For each significant finding/progress from a worker, try to match an existing issue: gh issue list --label swarm --search "<keywords>"
+   - If a rough match exists, reply with gh issue comment <number> summarizing the finding; include code snippets (code fences) from touched files.
+   - If no match exists, create one: gh issue create --title "<concise summary>" --body "<details + snippets>" --label swarm --label bug|research
+   - Choose label "bug" when it's a defect, otherwise "research".
 
-3. If ALL workers have exited (all logs show "<<worker has been stopped>>") → EXIT
-4. wait 5 seconds
-5. Repeat from step 1
+4. If ALL workers have exited (all logs show "<<worker has been stopped>>") -> EXIT
+5. wait 5 seconds
+6. Repeat from step 1
 
 DO NOT:
 - Write Python/bash scripts
