@@ -45,12 +45,15 @@ type agentView struct {
 	LogPath  string
 	Running  bool
 	ExitCode int
+	Spinner  int
 }
 
 type logBuffer struct {
 	lines []string
 	limit int
 }
+
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // New returns a ready-to-run UI model.
 func New(sess *session.Session, opts config.Options, events <-chan events.Event) Model {
@@ -142,6 +145,7 @@ func (m *Model) handleEvent(ev events.Event) Model {
 			Name:    e.Name,
 			Kind:    e.Kind,
 			Model:   e.Model,
+			LogPath: e.LogPath,
 			Running: true,
 		}
 		m.itemOrder = append(m.itemOrder, e.ID)
@@ -160,6 +164,9 @@ func (m *Model) handleEvent(ev events.Event) Model {
 		}
 		m.status = append(m.status, fmt.Sprintf("%s exited (%d)", e.ID, e.ExitCode))
 	case events.AgentLine:
+		if ag, ok := m.agents[e.ID]; ok {
+			ag.Spinner = (ag.Spinner + 1) % len(spinnerFrames)
+		}
 		buf := m.ensureLog(e.ID)
 		buf.append(e.Line)
 		m.updateViewport()
@@ -280,13 +287,13 @@ func (m Model) renderList() string {
 			rows = append(rows, m.renderRow("Todo", m.opts.Todo, selected, ""))
 		default:
 			ag := m.agents[id]
-			state := "●"
-			color := m.styles.running
-			if !ag.Running {
-				state = "○"
-				color = m.styles.error
+			var state string
+			if ag.Running {
+				frame := spinnerFrames[ag.Spinner%len(spinnerFrames)]
+				state = lipgloss.NewStyle().Foreground(m.styles.running).Render(frame)
+			} else {
+				state = lipgloss.NewStyle().Foreground(m.styles.error).Render("○")
 			}
-			state = lipgloss.NewStyle().Foreground(color).Render(state)
 			meta := fmt.Sprintf("%s %s", ag.Kind, ag.Model)
 			rows = append(rows, m.renderRow(ag.Name, meta, selected, state))
 		}
