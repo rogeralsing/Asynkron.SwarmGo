@@ -70,6 +70,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		o.stopAll()
 		return err
 	}
+	o.emit(events.PhaseChanged{Phase: "Workers running..."})
 
 	// Tick remaining time
 	deadline := time.Now().Add(o.opts.Duration())
@@ -87,6 +88,7 @@ loop:
 			return ctx.Err()
 		case <-timeout.C:
 			o.emit(events.StatusMessage{Message: "Time limit reached, stopping workers..."})
+			o.emit(events.PhaseChanged{Phase: "Stopping workers..."})
 			for _, w := range workers {
 				w.Stop()
 			}
@@ -106,6 +108,7 @@ loop:
 	}
 
 	o.emit(events.RemainingTime{Duration: 0})
+	o.emit(events.PhaseChanged{Phase: "Round finished"})
 	o.emit(events.StatusMessage{Message: "Round finished"})
 	return nil
 }
