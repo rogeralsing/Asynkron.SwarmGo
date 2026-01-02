@@ -10,6 +10,9 @@ type theme struct {
 	focus   lipgloss.Color
 	running lipgloss.Color
 	error   lipgloss.Color
+	say     lipgloss.Color
+	do      lipgloss.Color
+	see     lipgloss.Color
 }
 
 func defaultTheme() theme {
@@ -21,5 +24,8 @@ func defaultTheme() theme {
 		focus:   lipgloss.Color("#61afef"),
 		running: lipgloss.Color("#98c379"),
 		error:   lipgloss.Color("#e06c75"),
+		say:     lipgloss.Color("#abb2bf"),
+		do:      lipgloss.Color("#5c6370"),
+		see:     lipgloss.Color("#4b5263"),
 	}
 }

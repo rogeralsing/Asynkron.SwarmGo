@@ -348,9 +348,9 @@ func (m Model) renderLog() string {
 
 	// If an agent is selected, render its buffer directly to avoid viewport state glitches.
 	if selectedID != "session" {
-		content := ""
+		content := "waiting for output..."
 		if buf, ok := m.logs[selectedID]; ok {
-			content = buf.content()
+			content = m.renderAgentLog(buf)
 		}
 		box := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -416,16 +416,7 @@ func (b *logBuffer) append(entry logEntry) {
 func (b *logBuffer) content() string {
 	out := make([]string, 0, len(b.lines))
 	for _, l := range b.lines {
-		prefix := ""
-		switch l.Kind {
-		case events.MessageDo:
-			prefix = "→ "
-		case events.MessageSee:
-			prefix = ""
-		default:
-			prefix = ""
-		}
-		out = append(out, prefix+l.Text)
+		out = append(out, l.Text)
 	}
 	return strings.Join(out, "\n")
 }
@@ -445,6 +436,24 @@ func (m *Model) loadTodoContent() string {
 		return fmt.Sprintf("todo not found: %s (%v)", path, err)
 	}
 	return string(content)
+}
+
+func (m *Model) renderAgentLog(buf *logBuffer) string {
+	lines := make([]string, 0, len(buf.lines))
+	for _, l := range buf.lines {
+		switch l.Kind {
+		case events.MessageDo:
+			lines = append(lines, lipgloss.NewStyle().Foreground(m.styles.do).Render("→ "+l.Text))
+		case events.MessageSee:
+			lines = append(lines, lipgloss.NewStyle().Foreground(m.styles.see).Render(l.Text))
+		default:
+			lines = append(lines, lipgloss.NewStyle().Foreground(m.styles.say).Render(l.Text))
+		}
+	}
+	if len(lines) == 0 {
+		return "waiting for output..."
+	}
+	return strings.Join(lines, "\n")
 }
 
 func waitForEvent(ch <-chan events.Event) tea.Cmd {
